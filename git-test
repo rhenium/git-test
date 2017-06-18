@@ -1,0 +1,208 @@
+#!/usr/bin/env ruby
+require "optparse"
+require "fileutils"
+
+STDOUT.sync = true
+
+def color(color, string)
+  case color
+  when :red
+    "\e[31m%s\e[m" % string
+  when :green
+    "\e[32m%s\e[m" % string
+  when :yellow
+    "\e[33m%s\e[m" % string
+  else
+    raise "unknown color: %p" % color
+  end
+end
+
+def die(string)
+  STDERR.puts color(:red, "fatal: #{string}")
+  exit 1
+end
+
+def usage(io)
+  io << <<-EOS
+usage: git-test [<range>] [-t <command>] [-n] [-k] [-f] [-c <path>]
+
+Run automated tests against each commit of a range of commits in a Git
+repository.
+
+When no <range> is given, master..HEAD is assumed.
+
+OPTIONS
+	-b <base>, --base=<base>
+	-t <command>, --test=<command>
+	    Run <command> against each commit. It is run on a shell, with the
+	    current working directory at the top of the working tree. This may
+	    be used multiple times.
+
+	    When this option is not specified, the value(s) of the
+	    configuration 'git-test.test' is used.
+
+	-n, --dry-run
+	    Do everything except actually check out the tree and run the test
+	    commands.
+
+	-k, --keep-going
+	    Continue as much as possible after a test failure.
+
+	-f, --force
+	    Ignore the cached test result.
+
+	-c <path>, --checkout=<path>
+	    Checkout a tree at <path> (relative to the top of the current
+	    working tree) instead of $GIT_DIR/git-test/current.
+
+	    This can be also configured by 'git-test.checkout'.
+  EOS
+end
+
+def sh(*command, quiet: true, abort_on_failure: true)
+  ret = ""
+  IO.popen(command, err: [:child, :out]) do |io|
+    begin
+      while s = io.readpartial(1024)
+        ret << s
+        STDOUT << s unless quiet
+      end
+    rescue EOFError
+    end
+    io.close
+  end
+  if $? != 0 && abort_on_failure
+    die("command `#{command}' failed; $? = #{$?.exitstatus}\n#{ret}")
+  end
+  ret
+end
+
+def config(name, default = nil)
+  ret = sh("git", "config", "--null", name, abort_on_failure: false)
+  if $? == 0
+    ret.chomp("\0")
+  else
+    default
+  end
+end
+
+def config_multi(name, default = nil)
+  ret = sh("git", "config", "--get-all", "--null", name,
+           abort_on_failure: false)
+  if $? == 0
+    ret.split("\0")
+  else
+    default
+  end
+end
+
+opts = {
+  test: nil,
+  dry_run: false,
+  keep_going: false,
+  force: false,
+  checkout: nil,
+}
+OptionParser.new { |o|
+  o.on("-t <command>", "--test=<command>") { |v| (opts[:test] ||= []) << v }
+  o.on("-n", "--dry-run") { opts[:dry_run] = true }
+  o.on("-k", "--keep-going") { opts[:keep_going] = true }
+  o.on("-f", "--force") { opts[:force] = true }
+  o.on("-c <path>", "--checkout=<path>") { |v| opts[:checkout] = v }
+  o.on("--help") { usage(STDOUT); exit 0 }
+}.parse!(ARGV)
+
+die("too many arguments") if ARGV.size > 1
+range = ARGV.shift || "master..HEAD"
+
+# Read from git-config
+opts[:test] ||= config_multi("git-test.test") or
+  die("no test commands given")
+opts[:checkout] ||= (
+  config("git-test.checkout") ||
+  File.join(sh("git", "rev-parse", "--git-dir").chomp, "git-test", "current")
+)
+
+# Check the commit range
+commits = sh("git", "rev-list", "--reverse", range).split
+die("no commits to test") if commits.empty?
+
+# Check the cached results
+cached = commits.map { |sha1|
+  ret = sh("git", "notes", "--ref=git-test-cache", "show", "#{sha1}^{tree}",
+           abort_on_failure: false).chomp
+  ret == "SUCCESS"
+}
+
+# Print testing plan
+puts color(:green, "Commits to test (in order):")
+sh("git", "log", "--reverse", "--oneline", "--decorate", "--color", range,
+   quiet: false)
+
+# Prepare the working tree
+puts color(:green, "Preparing a working tree at #{opts[:checkout]}...")
+unless opts[:dry_run]
+  if File.directory?(opts[:checkout])
+    sh("git", "-C", opts[:checkout], "reset", "--hard")
+  else
+    sh("git", "worktree", "add", "--detach", opts[:checkout])
+  end
+end
+
+# Test them!
+success = true
+commits.each_with_index do |sha1, i|
+  h = "[#{i + 1}/#{commits.size}]"
+  puts color(:green, "### #{h} ".ljust(80, "#"))
+  sh("git", "--no-pager", "log", "-1", "--decorate", "--color", sha1,
+     quiet: false)
+
+  if !opts[:force] && cached[i]
+    puts color(:yellow, "#{h} ok (cached)")
+  else
+    puts color(:green, "Checking out #{sha1} at #{opts[:checkout]}...")
+    unless opts[:dry_run]
+      sh("git", "-C", opts[:checkout], "checkout", "--detach", "--force", sha1)
+    end
+
+    ok = true
+    opts[:test].each do |command|
+      puts color(:green, "Running command `#{command}'...")
+      if opts[:dry_run]
+        puts color(:green, "(dry-run) #{command}")
+      else
+        Dir.chdir(opts[:checkout]) {
+          sh("sh", "-c", command, quiet: false, abort_on_failure: false)
+        }
+      end
+      if $? == 0
+        unless opts[:dry_run]
+          sh("git", "notes", "--ref=git-test-cache", "add", "-f", "-m",
+             "SUCCESS", "#{sha1}^{tree}")
+        end
+      else
+        ok = false
+        if cached[i]
+          sh("git", "notes", "--ref=git-test-cache", "remove",
+             "#{sha1}^{tree}")
+        end
+        break
+      end
+    end
+
+    if ok
+      puts color(:yellow, "#{h} ok%s" % (opts[:dry_run] ? " (dry-run)" : ""))
+    else
+      puts color(:yellow, "#{h} not ok")
+      success = false
+      break unless opts[:keep_going]
+    end
+  end
+end
+
+if success
+  puts color(:yellow, "TEST SUCCESSFUL%s" % (opts[:dry_run]?" (dry-run)":""))
+else
+  puts color(:red, "TEST FAILED")
+end
+exit success

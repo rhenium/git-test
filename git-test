@@ -115,12 +115,14 @@ OptionParser.new { |o|
 die("too many arguments") if ARGV.size > 1
 range = ARGV.shift || "master..HEAD"
 
+git_test_dir = File.join(sh("git", "rev-parse", "--git-dir").chomp, "git-test")
+FileUtils.mkdir_p(git_test_dir)
+
 # Read from git-config
 opts[:test] ||= config_multi("git-test.test") or
   die("no test commands given")
 opts[:checkout] ||= (
-  config("git-test.checkout") ||
-  File.join(sh("git", "rev-parse", "--git-dir").chomp, "git-test", "current")
+  config("git-test.checkout") || File.join(git_test_dir, "current")
 )
 
 # Check the commit range
@@ -138,6 +140,11 @@ cached = commits.map { |sha1|
 puts color(:green, "Commits to test (in order):")
 sh("git", "log", "--reverse", "--oneline", "--decorate", "--color", range,
    quiet: false)
+
+# Acquire the lock; let Ruby unlock on exit
+lockfile = File.open(File.join(git_test_dir, "current.lock"), "w")
+lockfile.flock(File::LOCK_EX | File::LOCK_NB) or
+  die("could not acquire lock for #{lockfile.path}")
 
 # Prepare the working tree
 puts color(:green, "Preparing a working tree at #{opts[:checkout]}...")

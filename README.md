@@ -2,8 +2,8 @@ git-test
 ========
 
 git-test is a script for running tests on commits in a Git repository.
-It is useful for those who care every commit in a topic branch passes the
-test.
+It is useful for those who care whether every commit in a topic branch passes
+the test.
 
 git-test uses git-worktree(1) and runs the test inside a linked working tree
 so that the current working tree doesn't become polluted; you can make any

@@ -51,7 +51,7 @@ OPTIONS
 	-f, --force
 	    Ignore the cached test result.
 
-	-c <path>, --checkout=<path>
+	--checkout=<path>
 	    Checkout a tree at <path> (relative to the top of the current
 	    working tree) instead of $GIT_DIR/git-test/current.
 
@@ -108,7 +108,7 @@ OptionParser.new { |o|
   o.on("-n", "--dry-run") { opts[:dry_run] = true }
   o.on("-k", "--keep-going") { opts[:keep_going] = true }
   o.on("-f", "--force") { opts[:force] = true }
-  o.on("-c <path>", "--checkout=<path>") { |v| opts[:checkout] = v }
+  o.on("--checkout=<path>") { |v| opts[:checkout] = v }
   o.on("--help") { usage(STDOUT); exit 0 }
 }.parse!(ARGV)
 

@@ -40,6 +40,9 @@ OPTIONS
 	    When this option is not specified, the value(s) of the
 	    configuration 'git-test.test' is used.
 
+	-c, --clean
+	    Run "git clean -xdf" just before checking out the first tree.
+
 	-n, --dry-run
 	    Do everything except actually check out the tree and run the test
 	    commands.
@@ -97,6 +100,7 @@ end
 
 opts = {
   test: nil,
+  clean: false,
   dry_run: false,
   keep_going: false,
   force: false,
@@ -104,6 +108,7 @@ opts = {
 }
 OptionParser.new { |o|
   o.on("-t <command>", "--test=<command>") { |v| (opts[:test] ||= []) << v }
+  o.on("-c", "--clean") { opts[:clean] = true }
   o.on("-n", "--dry-run") { opts[:dry_run] = true }
   o.on("-k", "--keep-going") { opts[:keep_going] = true }
   o.on("-f", "--force") { opts[:force] = true }
@@ -150,6 +155,10 @@ puts color(:green, "Preparing a working tree at #{opts[:checkout]}...")
 unless opts[:dry_run]
   if File.directory?(opts[:checkout])
     sh("git", "-C", opts[:checkout], "reset", "--hard")
+    if opts[:clean]
+      puts color(:green, "Cleaning the working tree...")
+      sh("git", "-C", opts[:checkout], "clean", "-xdf")
+    end
   else
     sh("git", "worktree", "add", "--detach", opts[:checkout])
   end

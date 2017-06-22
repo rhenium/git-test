@@ -32,7 +32,6 @@ repository.
 When no <range> is given, master..HEAD is assumed.
 
 OPTIONS
-	-b <base>, --base=<base>
 	-t <command>, --test=<command>
 	    Run <command> against each commit. It is run on a shell, with the
 	    current working directory at the top of the working tree. This may

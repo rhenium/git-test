@@ -41,7 +41,9 @@ OPTIONS
 	    configuration 'git-test.test' is used.
 
 	-c, --clean
-	    Run "git clean -xdf" just before checking out the first tree.
+	    Ensure the working tree is clean before running the test commands
+	    specified by --test options. To be precise, this executes
+	    "git clean -xdff".
 
 	-n, --dry-run
 	    Do everything except actually check out the tree and run the test
@@ -155,10 +157,7 @@ puts color(:green, "Preparing a working tree at #{opts[:checkout]}...")
 unless opts[:dry_run]
   if File.directory?(opts[:checkout])
     sh("git", "-C", opts[:checkout], "reset", "--hard")
-    if opts[:clean]
-      puts color(:green, "Cleaning the working tree...")
-      sh("git", "-C", opts[:checkout], "clean", "-xdf")
-    end
+    sh("git", "-C", opts[:checkout], "clean", "-xdff")
   else
     sh("git", "worktree", "add", "--detach", opts[:checkout])
   end
@@ -178,6 +177,10 @@ commits.each_with_index do |sha1, i|
     puts color(:green, "Checking out #{sha1} at #{opts[:checkout]}...")
     unless opts[:dry_run]
       sh("git", "-C", opts[:checkout], "checkout", "--detach", "--force", sha1)
+      if opts[:clean]
+        puts color(:green, "Cleaning the working tree...")
+        sh("git", "-C", opts[:checkout], "clean", "-xdff")
+      end
     end
 
     ok = true
